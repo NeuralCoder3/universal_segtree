@@ -12,13 +12,6 @@ insert
 worst case O(log n)
 no neutral element needed
 
-lazy init:
-1,2,5 with 1
-sum = 3
-+3 on all
-sum = 12
-insert 3,4 with 1
-sum = 14
 *)
 
 
@@ -180,7 +173,6 @@ module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) = struct
     in
     aux 0 tree
 
-  (* TODO: lazy update logic *)
 
   let get_lower = function Empty -> failwith "Empty node has no lower bound" | Node n -> n.lower
   let get_upper = function Empty -> failwith "Empty node has no upper bound" | Node n -> n.upper
@@ -197,33 +189,52 @@ module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) = struct
       update = U.empty 
     }
 
+  let push_down tree =
+    match tree with
+    | Empty -> Empty
+    | Node n ->
+      if n.update = U.empty then 
+        tree
+      else
+        if n.left = Empty && n.right = Empty then
+          (* we should not arrive at a leaf here *)
+          (* assert false *)
+          (* or bake in update *)
+          Node { n with value = U.apply_update n.value n.update; update = U.empty }
+          (* or leave as is *)
+          (* tree *)
+        else
+          let left' = apply_update n.left n.update in
+          let right' = apply_update n.right n.update in
+          Node { n with update = U.empty; left = left'; right = right' }
+
   let balance left right =
     let hl = get_height left in
     let hr = get_height right in
     if hl > hr + 1 then
-      (* rebalance left *)
-      match left with
+      (* rebalance left before rotating *)
+      match push_down left with
       | Node l_node ->
           if get_height l_node.left >= get_height l_node.right then
             (* single right rotation *)
             make_inner l_node.left (make_inner l_node.right right)
           else
             (* double right rotation *)
-            (match l_node.right with
+            (match push_down l_node.right with
             | Node lr_node ->
                 make_inner (make_inner l_node.left lr_node.left) (make_inner lr_node.right right)
             | Empty -> failwith "impossible AVL state")
       | Empty -> failwith "impossible AVL state"
     else if hr > hl + 1 then
-      (* rebalance right *)
-      match right with
+      (* rebalance right before rotating *)
+      match push_down right with
       | Node r_node ->
           if get_height r_node.right >= get_height r_node.left then
             (* single left rotation *)
             make_inner (make_inner left r_node.left) r_node.right
           else
             (* double left rotation *)
-            (match r_node.left with
+            (match push_down r_node.left with
             | Node rl_node ->
                 make_inner (make_inner left rl_node.left) (make_inner rl_node.right r_node.right)
             | Empty -> failwith "impossible AVL state")
@@ -233,7 +244,8 @@ module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) = struct
       make_inner left right
 
   let insert x v t =
-    let rec ins = function
+    let rec ins tree =
+      match push_down tree with
       | Empty -> 
           Node { height = 1; lower = x; upper = x; value = v; left = Empty; right = Empty; update = U.empty }
           
@@ -342,6 +354,38 @@ let test () =
   Printf.printf "After range update [1, 4): %d\n" (ST.query tree 0 n).sum;
   Printf.printf "\n\n\n%!";
   ()
+
+
+(* 
+lazy init:
+1,2,5 with 1
+sum = 3
++3 on all
+sum = 12
+insert 3,4 with 1
+sum = 14 
+*)
+let test2 () =
+  let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
+  let base_value = { sum = 1; count = 1 } in
+  let tree = ST.init in
+  let tree = ST.insert 1 base_value tree in
+  let tree = ST.insert 2 base_value tree in
+  let tree = ST.insert 5 base_value tree in
+  Printf.printf "Initial tree:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
+  Printf.printf "Initial sum of [0, n): %d\n%!" (ST.query tree 0 6).sum;
+  Printf.printf "\n\n\n%!";
+  let tree = ST.range_update tree 0 6 (AddValue 3) in
+  Printf.printf "After adding 3 to all:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
+  Printf.printf "Sum of [0, n) after adding 3: %d\n%!" (ST.query tree 0 6).sum;
+  Printf.printf "\n\n\n%!";
+  let tree = ST.insert 3 base_value tree in
+  let tree = ST.insert 4 base_value tree in
+  Printf.printf "After inserting 3 and 4:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
+  Printf.printf "Sum of [0, n) after inserting 3 and 4: %d\n%!" (ST.query tree 0 6).sum;
+  Printf.printf "\n\n\n%!";
+  ()
+
   
 (* 
 stress test for lazy update:
