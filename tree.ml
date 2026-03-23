@@ -25,49 +25,25 @@ module type Updater = sig
   val apply_update : base_t -> update -> base_t
 end
 
-module type Optional_Updater = sig
-  type t 
-  val base : (module Base with type t = t) 
-  val updater : (module Updater with type base_t = t) option
+module DummyUpdater (B:Base) = struct
+  type base_t = B.t
+  type update = unit
+  let compose () () = ()
+  (* let apply_update v () = failwith "no range updates supported" *)
+  let apply_update v () = v
 end
-
-
-
-  (* type tree = Leaf of (int*B.t) | Node of ((int*int*int)*B.t*tree*tree)
-
-  let get_value = function
-    | Leaf (_, v) -> v
-    | Node ((_, _, _), v, _, _) -> v
-
-  let rec init (min,max) =
-    if min = max then Leaf (min, B.default)
-    else
-      let mid = (min + max) / 2 in
-      let sub_tree = init (min, mid) in
-      let sub_tree' = init (mid+1, max) in
-      let value = B.combine (get_value sub_tree) (get_value sub_tree') in
-      Node ((min, mid, max), value, sub_tree, sub_tree') *)
-
-  (*
-      we use key 0..n-1 
-      one could annotate keys manually
-      the index can be computed on the fly
-  *)
-
 
 (* 
   use int key for now 
   ordered, mid point
 *)
-module SegmentTree (U:Optional_Updater) = struct
+module SegmentTree (B:Base) (U:Updater with type base_t = B.t) = struct
 
-  module B = (val U.base : Base with type t = U.t)
-
-  type tree = Leaf of B.t | Node of (B.t * tree * tree)
+  type tree = Leaf of B.t | Node of (B.t * U.update option * tree * tree)
 
   let get_value = function
     | Leaf v -> v
-    | Node (v, _, _) -> v
+    | Node (v, _, _, _) -> v
 
   let rec init n =
     if n = 1 then Leaf B.default
@@ -79,32 +55,38 @@ module SegmentTree (U:Optional_Updater) = struct
       in
       let value = B.combine (get_value sub_tree) (get_value sub_tree') in
       assert (value = B.default);
-      Node (value, sub_tree, sub_tree')
+      Node (value, None, sub_tree, sub_tree')
 
+  (* TODO: do I need to propagate down? *)
   let rec query tree i j =
     match tree with
     | Leaf v -> (assert (i = 0 && j = 0); v)
-    | Node (v, left, right) ->
+    | Node (v, u, left, right) ->
       let mid = (j - i + 1) / 2 in
-      if j < mid then query left i j
-      else if i >= mid then query right (i - mid) (j - mid)
-      else B.combine (query left i (mid-1)) (query right 0 (j - mid))
+      let value =
+        if j < mid then query left i j
+        else if i >= mid then query right (i - mid) (j - mid)
+        else B.combine (query left i (mid-1)) (query right 0 (j - mid))
+      in
+      match u with
+      | None -> value
+      | Some u -> U.apply_update value u
 
-  let rec update tree i v =
+  (* point update *)
+  let rec update tree i f =
     match tree with
-    | Leaf _ -> (assert (i = 0); Leaf v)
-    | Node (_, left, right) ->
+    | Leaf v -> (assert (i = 0); Leaf (f v))
+    | Node (_, None, left, right) ->
       let mid = (i + 1) / 2 in
       if i < mid then
-        let left' = update left i v in
+        let left' = update left i f in
         let value = B.combine (get_value left') (get_value right) in
-        Node (value, left', right)
+        Node (value, None, left', right)
       else
-        let right' = update right (i - mid) v in
+        let right' = update right (i - mid) f in
         let value = B.combine (get_value left) (get_value right') in
-        Node (value, left, right')
-
-  (* let rec range_update tree i j v =
-    match tree with *)
+        Node (value, None, left, right')
+    | Node (_, _, left, right) ->
+        failwith "not implemented: point update on tree with pending range update"
 
 end
