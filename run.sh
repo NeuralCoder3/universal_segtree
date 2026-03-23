@@ -1,0 +1,1 @@
+ocamlopt -O3 tree.ml -o tree.out && ./tree.out
