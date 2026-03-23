@@ -39,118 +39,125 @@ module DummyUpdater (B:Base) = struct
   let apply_update v () = v
 end
 
-module type Key = sig
-  type t
-  val le: t -> t -> bool
-end
-
-
 (* 
-    lower update is older => apply first
-    maintained by not placing an update under an existing one (always propagate the old one before)
+  use int key for now 
+  ordered, mid point
 *)
-module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
+module SegmentTree (B:Base) (U:Updater with type base_t = B.t) = struct
 
-  type tree = Empty | Node of {
+  (* type tree = Leaf of int*B.t | Node of ((B.t * U.update) * (int*int) * tree * tree) *)
+  type tree = Leaf of { key: int; value: B.t } | Node of {
     value: B.t; 
-    update: U.update; (* should be empty for leaf nodes (TODO: check) *)
-    left: tree; (* empty for leaf *)
-    right: tree;
-
-    lower: K.t;
-    upper: K.t; (* inclusive, = lower for leaf *)
+    update: U.update; 
+    lower: int;
+    mid: int;
+    upper: int;
+    left: tree; 
+    right: tree
   }
+  type segment_tree = { size : int; tree : tree }
 
-  (* helper *)
   let get_value = function
-    | Empty -> 
-      failwith "Empty node has no value"
-      (* B.default  *)
-      (* TODO: fail instead? *)
+    | Leaf n -> n.value
     | Node n -> U.apply_update n.value n.update
 
-  let init = Empty
+  let rec init lower upper =
+    if lower + 1 = upper then Leaf { key = lower; value = B.default }
+    else
+      let mid = (lower + upper) / 2 in
+      let left = init lower mid in
+      let right = init mid upper in
+      let value = B.combine (get_value left) (get_value right) in
+      (* assert (value = B.default); *)
+      Node { value; update = U.empty; lower; mid; upper; left; right }
 
+(*
+  either directly propagate updates down, or collect them
+*)
+(*
+  all out range => id
+  all in range => value
+  else => combine
 
+  can leave i j same
+*)
 let query tree i j =
-  assert (K.le i j);
-  let rec aux pending tree =
+  let rec aux pending tree i j =
+    assert (i <= j);
     match tree with
-    | Empty -> failwith "Empty node has no value"
-      (* B.default *)
+    | Leaf n -> (assert (i+1 = j && i = n.key); U.apply_update n.value pending)
     | Node n ->
+      (assert (i >= n.lower && j <= n.upper));
+      (* lower update is older => apply first *)
       let update = U.compose n.update pending in
-      (* completely in range *)
-      if K.le i n.lower && K.le n.upper j then U.apply_update n.value update
-      (* completely out of range *)
-      (* TODO: this is the only place where we need the default element (and could avoid it) *)
-      (* do not apply update as we need the neutral element for combine (if it fully falls in left/right) *)
-      else if K.le n.upper i || K.le j n.lower then B.default
-      (* partially in range *)
-      else B.combine (aux update n.left) (aux update n.right)
+      if j <= n.mid then aux update n.left i j
+      else if i >= n.mid then aux update n.right i j
+      else (
+        (* can query whole node *)
+        if i = n.lower && j = n.upper then get_value tree
+        else B.combine (aux update n.left i n.mid) (aux update n.right n.mid j)
+      )
   in
-  aux U.empty tree
+  aux U.empty tree i j
 
-  (* helper *)
   let apply_update tree u =
     match tree with
-    | Empty -> failwith "Empty node cannot be updated"
+    | Leaf n -> Leaf { n with value = U.apply_update n.value u }
     | Node n ->
+      (* the older update is father down as we never place an update under another one *)
       let u' = U.compose n.update u in
-      (* we do not want the updated value
-        otherwise, we would need to reapply it (e.g. if querying below it)
-      *)
+      (* do we want updated value already? *)
+      (* probably not, otherwise if we change the update, we need to reapply it *)
+      (* e.g. if quering below it *)
+      (* let value = U.apply_update v u in *)
       Node { n with update = u' }
 
-  (* point update with arbitrary function *)
+  (* point update *)
   let rec point_update tree i f =
     match tree with
-    | Empty -> failwith "Empty node cannot be updated"
+    | Leaf n -> (assert (i = n.key); Leaf { n with value = f n.value })
     | Node n ->
-      (* if out of range, return node *)
-      if K.le i n.lower || K.le n.upper i then tree else
-      (* if single node, update else fail *)
-      if n.lower = n.upper then 
-        (if i = n.lower then 
-          let new_value = f (U.apply_update n.value n.update) in
-          Node { n with value = new_value; update = U.empty }
-        else failwith "Index not found")
-      else
       (* if pending update, propagate downward *)
       (* never place update under other update *)
       let (left', right') = (apply_update n.left n.update, apply_update n.right n.update) in
-      (* propagate update down *)
-      Node { n with update = U.empty; left = point_update left' i f; right = point_update right' i f }
+      if i < n.mid then
+        let left'' = point_update left' i f in
+        let value = B.combine (get_value left'') (get_value right') in
+        Node { n with value; update = U.empty; left = left''; right = right' }
+      else
+        let right'' = point_update right' i f in
+        let value = B.combine (get_value left') (get_value right'') in
+        Node { n with value; update = U.empty; left = left'; right = right'' }
 
   let rec range_update tree i j u =
     match tree with
-    | Empty -> Empty
+    | Leaf n -> 
+      (assert (i = n.key && j = i+1); Leaf { n with value = U.apply_update n.value u })
     | Node n ->
-      (* fully outside do nothing *)
-      if K.le n.upper i || K.le j n.lower then tree
-      (* fully inside *)
-      else if K.le i n.lower && K.le n.upper j then apply_update tree u
+      (assert (i >= n.lower && j <= n.upper));
+      if i = n.lower && j = n.upper then apply_update tree u
       else
-      (* recurse *)
         let (left', right') = (apply_update n.left n.update, apply_update n.right n.update) in
-        let (left'', right'') = (range_update left' i j u, range_update right' i j u) in
+        let (left'', right'') = 
+           if j <= n.mid then (range_update left' i j u, right')
+           else if i >= n.mid then (left', range_update right' i j u)
+           else (
+             let left'' = range_update left' i n.mid u in
+             let right'' = range_update right' n.mid j u in
+             (left'', right'')
+           )
+        in
         let value = B.combine (get_value left'') (get_value right'') in
         Node { n with value; update = U.empty; left = left''; right = right'' }
 
   let show show_key show_update show_value tree =
     let rec aux level tree =
       match tree with
-      | Empty -> Printf.sprintf "%sEmpty\n" (String.make (2*level) ' ')
+      | Leaf n -> Printf.sprintf "%sLeaf(key=%s, value=%s)" (String.make (2*level) ' ') (show_key n.key) (show_value n.value)
       | Node n ->
         let left_str = aux (level + 1) n.left in
         let right_str = aux (level + 1) n.right in
-        Printf.sprintf "%sNode(key=[%s, %s], value=%s, update=%s)\n%s\n%s" 
-          (String.make (2*level) ' ') 
-          (show_key n.lower) 
-          (show_key n.upper) 
-          (show_value n.value) 
-          (show_update n.update) 
-          left_str right_str
+        Printf.sprintf "%sNode(value=%s, update=%s)\n%s\n%s" (String.make (2*level) ' ') (show_value n.value) (show_update n.update) left_str right_str
     in
     aux 0 tree
 
@@ -169,6 +176,13 @@ end
 
 
 
+
+(* with type t = int *)
+module SumPointBase : Base = struct
+  type t = int
+  let default = 0
+  let combine = ( + )
+end
 
 (* 
 It has to be known that SumBase and SumUpdate are compatible, i.e. SumUpdate.base_t = SumBase.t
@@ -205,11 +219,7 @@ module SumUpdater : Updater with type base_t = sum_t with type update = sum_upda
     | NoUpdate -> base
     | SetValue v -> { base with sum = v * base.count }
     | AddValue delta -> { base with sum = base.sum + delta * base.count }
-end
 
-module IntKey : Key with type t = int = struct
-  type t = int
-  let le a b = a <= b
 end
 
 
@@ -221,7 +231,7 @@ let show_sum_update = function
 let show_sum { sum; count } = Printf.sprintf "(Sum=%d, Count=%d)" sum count
 
 let () = 
-  let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
+  let module ST = SegmentTree(SumBase)(SumUpdater) in
   (* let n = 1024 in *)
   let n = 8 in
   let tree = ST.init 0 n in
@@ -250,9 +260,10 @@ let () =
   let module ST = SegmentTree(SumBase)(SumUpdater) in
   (* let n = 1024 in *)
   let n = 1_000_000 in
+  (* let n = 1_000_000_0 in *)
   (*
-  10^6  1.65s
-  10^7 18.47s
+  10^6  1.65s / 1.32s (ocaml), 0.18s (ocamlopt -O3), 1.25 (ocamlc)
+  10^9 18.47s
   *)
   let tree = ST.init 0 n in
 
@@ -276,3 +287,5 @@ let () =
   (* Printf.printf "Total sum after %d updates: %d (expected: %d)\n%!" n total_sum.sum (n * n); *)
   (* Printf.printf "Sums after %d updates: %s\n%!" n (String.concat ", " (List.map string_of_int sums)); *)
   ()
+
+(* TODO: query whole range is missing update *)
