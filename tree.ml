@@ -1,4 +1,20 @@
-(* fenwick tree for invertible operation *)
+(* 
+fenwick tree for invertible operation 
+compare other
+add signature
+ffi could use ctypes ocaml library
+
+invariants
+describe alternatives
+
+lazy init:
+1,2,5 with 1
+sum = 3
++3 on all
+sum = 12
+insert 3,4 with 1
+sum = 14
+*)
 
 
 module type Base = sig
@@ -32,7 +48,6 @@ module type Key = sig type t end
 *)
 module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
 
-  type color = Red | Black
   (* split node to allow aliasing it in matching *)
   type node = {
       value: B.t; 
@@ -44,7 +59,7 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
       lower: K.t;
       upper: K.t; (* inclusive, = lower for leaf *)
 
-      color: color;
+      height : int;
   } and tree = 
     | Empty 
     | Node of node
@@ -148,10 +163,11 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
 
   let get_lower = function Empty -> failwith "Empty node has no lower bound" | Node n -> n.lower
   let get_upper = function Empty -> failwith "Empty node has no upper bound" | Node n -> n.upper
+  let get_height = function Empty -> 0 | Node n -> n.height
 
-  let make_inner color left right =
+  let make_inner left right =
     Node { 
-      color; 
+      height = 1 + max (get_height left) (get_height right);
       lower = min (get_lower left) (get_lower right);
       upper = max (get_upper left) (get_upper right); 
       value = combine' (get_value left) (get_value right);
@@ -160,49 +176,67 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
       update = U.empty 
     }
 
-  let balance color left right =
-    match color, left, right with
-    (* Left-Left *)
-    | Black, Node { color=Red; left=Node { color=Red; left=a; right=b }; right=c }, d
-    (* Left-Right *)
-    | Black, Node { color=Red; left=a; right=Node { color=Red; left=b; right=c } }, d
-    (* Right-Left *)
-    | Black, a, Node { color=Red; left=Node { color=Red; left=b; right=c }; right=d }
-    (* Right-Right *)
-    | Black, a, Node { color=Red; left=b; right=Node { color=Red; left=c; right=d } } ->
-        
-        make_inner Red (make_inner Black a b) (make_inner Black c d)
-
-    (* no violation *)
-    | _ -> 
-        make_inner color left right
+  let balance left right =
+    let hl = get_height left in
+    let hr = get_height right in
+    if hl > hr + 1 then
+      (* rebalance left *)
+      match left with
+      | Node l_node ->
+          if get_height l_node.left >= get_height l_node.right then
+            (* single right rotation *)
+            make_inner l_node.left (make_inner l_node.right right)
+          else
+            (* double right rotation *)
+            (match l_node.right with
+            | Node lr_node ->
+                make_inner (make_inner l_node.left lr_node.left) (make_inner lr_node.right right)
+            | Empty -> failwith "impossible AVL state")
+      | Empty -> failwith "impossible AVL state"
+    else if hr > hl + 1 then
+      (* rebalance right *)
+      match right with
+      | Node r_node ->
+          if get_height r_node.right >= get_height r_node.left then
+            (* single left rotation *)
+            make_inner (make_inner left r_node.left) r_node.right
+          else
+            (* double left rotation *)
+            (match r_node.left with
+            | Node rl_node ->
+                make_inner (make_inner left rl_node.left) (make_inner rl_node.right r_node.right)
+            | Empty -> failwith "impossible AVL state")
+      | Empty -> failwith "impossible AVL state"
+    else
+      (* already balanced *)
+      make_inner left right
 
   let insert x v t =
     let rec ins = function
       | Empty -> 
-          Node { color = Black; lower = x; upper = x; value = v; left = Empty; right = Empty; update = U.empty }
+          Node { height = 1; lower = x; upper = x; value = v; left = Empty; right = Empty; update = U.empty }
           
       | Node n ->
           if n.left = Empty && n.right = Empty then
-            let new_leaf = Node { color = Black; lower = x; upper = x; value = v; left = Empty; right = Empty; update = U.empty } in
+            (* leaf case *)
+            let new_leaf = Node { height = 1; lower = x; upper = x; value = v; left = Empty; right = Empty; update = U.empty } in
             
             if x < n.lower then
-              make_inner Red new_leaf (Node n)
+              make_inner new_leaf (Node n)
             else if x > n.lower then
-              make_inner Red (Node n) new_leaf
+              make_inner (Node n) new_leaf
             else
+              (* duplicate, overwrite *)
               Node { n with value = v }
               
           else
             let left_upper = get_upper n.left in
             if x <= left_upper then 
-              balance n.color (ins n.left) n.right
+              balance (ins n.left) n.right
             else 
-              balance n.color n.left (ins n.right)
+              balance n.left (ins n.right)
     in
-    match ins t with
-    | Empty -> Empty
-    | Node n -> Node { n with color = Black } 
+    ins t
 
 end
 
@@ -271,7 +305,7 @@ let show_sum { sum; count } = Printf.sprintf "(Sum=%d, Count=%d)" sum count
 
 
 
-let () = 
+let test () = 
   let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
   (* let n = 1024 in *)
   let n = 8 in
@@ -301,14 +335,18 @@ without combined updates: O(n log n) for each query, total O(n^2 log n)
 without lazy updates: O(n) for each update + O(log n) for each query, total O(n^2)
 *)
 
-let () =
+let test_stress () =
   let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
   (* let n = 8 in *)
   (* let n = 1024 in *)
-  let n = 100_000_000 in
+  let n = 1_000_000 in
   (*
+  Red-Black:
   10^6  3.23s (ocaml), 1.05s (ocamlopt -O3)
   10^7 11.5s (ocamlopt -O3)
+
+  AVL: (should only change creation time)
+  10^6: 0.94s (ocamlopt -O3)
   *)
   let tree = ST.init in
   let tree = List.fold_left (fun t i -> ST.insert i sum_init t) tree (List.init n Fun.id) in
