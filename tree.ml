@@ -7,6 +7,11 @@ ffi could use ctypes ocaml library
 invariants
 describe alternatives
 
+functional
+insert
+worst case O(log n)
+no neutral element needed
+
 lazy init:
 1,2,5 with 1
 sum = 3
@@ -25,9 +30,8 @@ end
 module type Updater = sig
   type base_t
   type update
-  val empty : update (* None, identity for compose, apply *)
   val compose : update -> update -> update
-  (* also on composed leafs *)
+  (* also on composed nodes *)
   val apply_update : base_t -> update -> base_t
 end
 
@@ -41,12 +45,25 @@ end
 
 module type Key = sig type t end
 
+module OptionUpdater (U: Updater) = struct
+  type update = U.update option
+  let empty = None
+  let compose old_update new_update =
+    match (old_update, new_update) with
+    | (None, u) | (u, None) -> u
+    | (Some u1, Some u2) -> Some (U.compose u1 u2)
+  let apply_update base = function
+    | None -> base
+    | Some u -> U.apply_update base u
+end
 
 (* 
     lower update is older => apply first
     maintained by not placing an update under an existing one (always propagate the old one before)
 *)
-module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
+module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) = struct
+
+  module U = OptionUpdater(BU)
 
   (* split node to allow aliasing it in matching *)
   type node = {
@@ -134,7 +151,7 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
       (* fully outside do nothing *)
       if n.upper < i || j < n.lower then tree
       (* fully inside *)
-      else if i <= n.lower && n.upper <= j then apply_update tree u
+      else if i <= n.lower && n.upper <= j then apply_update tree (Some u)
       else
       (* recurse *)
         let (left', right') = (apply_update n.left n.update, apply_update n.right n.update) in
@@ -143,6 +160,10 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
         Node { n with value; update = U.empty; left = left''; right = right'' }
 
   let show show_key show_update show_value tree =
+    let show_option_update = function
+      | None -> "-"
+      | Some u -> show_update u
+    in
     let rec aux level tree =
       match tree with
       | Empty -> ""
@@ -154,7 +175,7 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
           (show_key n.lower) 
           (show_key n.upper) 
           (show_value n.value) 
-          (show_update n.update) 
+          (show_option_update n.update) 
           left_str right_str
     in
     aux 0 tree
@@ -269,22 +290,18 @@ end
 type sum_updates = 
   | SetValue of int
   | AddValue of int
-  | NoUpdate
 module SumUpdater : Updater with type base_t = sum_t with type update = sum_updates = struct
   type base_t = sum_t
   type update = sum_updates
 
-  let empty = NoUpdate
   let compose old_update new_update =
     match (old_update, new_update) with
-    | (NoUpdate, u) | (u, NoUpdate) -> u
     | (_, SetValue v) -> SetValue v
     | (SetValue v, AddValue delta) -> SetValue (v + delta)
     | (AddValue v1, AddValue v2) -> AddValue (v1 + v2)
 
   let apply_update base update =
     match update with
-    | NoUpdate -> base
     | SetValue v -> { base with sum = v * base.count }
     | AddValue delta -> { base with sum = base.sum + delta * base.count }
 end
@@ -295,7 +312,6 @@ module IntKey : Key with type t = int = struct
 end
 
 let show_sum_update = function
-  | NoUpdate -> "-"
   | SetValue v -> Printf.sprintf "%d" v
   | AddValue delta -> Printf.sprintf "+%d" delta
 
