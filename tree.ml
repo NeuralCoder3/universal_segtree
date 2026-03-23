@@ -1,20 +1,3 @@
-(* 
-fenwick tree for invertible operation 
-compare other
-add signature
-ffi could use ctypes ocaml library
-
-invariants
-describe alternatives
-
-functional
-insert
-worst case O(log n)
-no neutral element needed
-
-*)
-
-
 module type Base = sig
   type t
   val combine : t -> t -> t (* associative *)
@@ -50,11 +33,21 @@ module OptionUpdater (U: Updater) = struct
     | Some u -> U.apply_update base u
 end
 
+
+
 (* 
     lower update is older => apply first
     maintained by not placing an update under an existing one (always propagate the old one before)
 *)
-module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) = struct
+module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) : sig
+  type tree
+  val init : tree
+  val query : tree -> K.t -> K.t -> B.t
+  val point_update : tree -> K.t -> (B.t -> B.t) -> tree
+  val range_update : tree -> K.t -> K.t -> BU.update -> tree
+  val show : (K.t -> string) -> (BU.update -> string) -> (B.t -> string) -> tree -> string 
+  val insert : tree -> K.t -> B.t -> tree
+end = struct
 
   module U = OptionUpdater(BU)
 
@@ -243,7 +236,7 @@ module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) = struct
       (* already balanced *)
       make_inner left right
 
-  let insert x v t =
+  let insert t x v =
     let rec ins tree =
       match push_down tree with
       | Empty -> 
@@ -341,7 +334,7 @@ let test () =
   (*
     Create all keys
   *)
-  let tree = List.fold_left (fun t i -> ST.insert i sum_init t) tree (List.init n Fun.id) in
+  let tree = List.fold_left (fun t i -> ST.insert t i sum_init) tree (List.init n Fun.id) in
   Printf.printf "%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
   Printf.printf "Initial sum of [0, n): %d\n%!" (ST.query tree 0 n).sum;
   Printf.printf "\n\n\n%!";
@@ -369,9 +362,9 @@ let test2 () =
   let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
   let base_value = { sum = 1; count = 1 } in
   let tree = ST.init in
-  let tree = ST.insert 1 base_value tree in
-  let tree = ST.insert 2 base_value tree in
-  let tree = ST.insert 5 base_value tree in
+  let tree = ST.insert tree 1 base_value in
+  let tree = ST.insert tree 2 base_value in
+  let tree = ST.insert tree 5 base_value in
   Printf.printf "Initial tree:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
   Printf.printf "Initial sum of [0, n): %d\n%!" (ST.query tree 0 6).sum;
   Printf.printf "\n\n\n%!";
@@ -379,8 +372,8 @@ let test2 () =
   Printf.printf "After adding 3 to all:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
   Printf.printf "Sum of [0, n) after adding 3: %d\n%!" (ST.query tree 0 6).sum;
   Printf.printf "\n\n\n%!";
-  let tree = ST.insert 3 base_value tree in
-  let tree = ST.insert 4 base_value tree in
+  let tree = ST.insert tree 3 base_value in
+  let tree = ST.insert tree 4 base_value in
   Printf.printf "After inserting 3 and 4:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
   Printf.printf "Sum of [0, n) after inserting 3 and 4: %d\n%!" (ST.query tree 0 6).sum;
   Printf.printf "\n\n\n%!";
@@ -409,7 +402,7 @@ let test_stress () =
   10^6: 0.94s (ocamlopt -O3)
   *)
   let tree = ST.init in
-  let tree = List.fold_left (fun t i -> ST.insert i sum_init t) tree (List.init n Fun.id) in
+  let tree = List.fold_left (fun t i -> ST.insert t i sum_init) tree (List.init n Fun.id) in
 
   (* let tree' = tree in
   let tree' = ST.range_update tree' 0 n (AddValue 1) in
