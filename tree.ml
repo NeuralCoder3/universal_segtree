@@ -1,25 +1,8 @@
-(*
-
-- range query
-- base type
-- combine operation (associative)
-- point update
-
-- optional: range update (lazy, needs update type, combine, apply)
-
-TODO:
-- insert (based on red-black trees)
-- compare OCaml segment tree
-
-fenwick tree for invertible operation
-
-*)
+(* fenwick tree for invertible operation *)
 
 
 module type Base = sig
   type t
-  (* val default : t *)
-  (* identity for combine -- neutral element *)
   val combine : t -> t -> t (* associative *)
 end
 
@@ -40,10 +23,7 @@ module DummyUpdater (B:Base) = struct
   let apply_update v () = v
 end
 
-module type Key = sig
-  type t
-  val le: t -> t -> bool
-end
+module type Key = sig type t end
 
 
 (* 
@@ -56,8 +36,9 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
   (* split node to allow aliasing it in matching *)
   type node = {
       value: B.t; 
-      update: U.update; (* should be empty for leaf nodes (TODO: check) *)
-      left: tree; (* empty for leaf *)
+      update: U.update;
+      (* empty for leaf (both are always simultanously empty) *)
+      left: tree; 
       right: tree;
 
       lower: K.t;
@@ -72,13 +53,6 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
   let get_value = function
     | Empty -> None
     | Node n -> Some (U.apply_update n.value n.update)
-  (* let get_value = function
-    | Empty -> 
-      (* assert false *)
-      failwith "Empty node has no value"
-      (* B.default  *)
-      (* TODO: fail instead? *)
-    | Node n -> U.apply_update n.value n.update *)
 
   let init = Empty
 
@@ -86,7 +60,6 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
     | (None, None) -> failwith "Both nodes are empty, cannot combine"
     | (Some x, None) | (None, Some x) -> x
     | (Some x, Some y) -> B.combine x y
-
 
   let query tree i j =
     assert (i <= j);
@@ -99,8 +72,6 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
         (* completely in range *)
         if i <= n.lower && n.upper <= j then Some (U.apply_update n.value update)
         (* completely out of range *)
-        (* TODO: this is the only place where we need the default element (and could avoid it) *)
-        (* do not apply update as we need the neutral element for combine (if it fully falls in left/right) *)
         else if n.upper < i || j < n.lower then None
         (* partially in range *)
         else Some (combine' (aux update n.left) (aux update n.right))
@@ -123,7 +94,6 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
     match tree with
     | Empty -> failwith "Empty node cannot be updated"
     | Node n ->
-      (* Printf.printf "Visiting node [%s, %s] \n%!" (string_of_int (Obj.magic n.lower)) (string_of_int (Obj.magic n.upper)); *)
       (* if out of range, return node *)
       if i < n.lower || i > n.upper then tree else
       (* if single node, update else fail *)
@@ -154,14 +124,12 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
       (* recurse *)
         let (left', right') = (apply_update n.left n.update, apply_update n.right n.update) in
         let (left'', right'') = (range_update left' i j u, range_update right' i j u) in
-        (* let value = B.combine (get_value left'') (get_value right'') in *)
         let value = combine' (get_value left'') (get_value right'') in
         Node { n with value; update = U.empty; left = left''; right = right'' }
 
   let show show_key show_update show_value tree =
     let rec aux level tree =
       match tree with
-      (* | Empty -> Printf.sprintf "%sEmpty" (String.make (2*level) ' ') *)
       | Empty -> ""
       | Node n ->
         let left_str = aux (level + 1) n.left in
@@ -178,25 +146,14 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
 
   (* TODO: lazy update logic *)
 
-  (* or assume that functions are only called on Node *)
-  let get_lower = function Empty -> None | Node n -> Some n.lower
-  let get_upper = function Empty -> None | Node n -> Some n.upper
-
-  let compare min a b = match (a, b) with
-    | (None, None) -> failwith "Both nodes are empty, cannot compare"
-    | (Some x, None) | (None, Some x) -> x
-    | (Some x, Some y) -> if min then (
-      if x <= y then x else y
-    ) else (
-      if x <= y then y else x
-    )
+  let get_lower = function Empty -> failwith "Empty node has no lower bound" | Node n -> n.lower
+  let get_upper = function Empty -> failwith "Empty node has no upper bound" | Node n -> n.upper
 
   let make_inner color left right =
     Node { 
       color; 
-      lower = compare true (get_lower left) (get_lower right); 
-      upper = compare false (get_upper left) (get_upper right); 
-      (* value = B.combine (get_value left) (get_value right);  *)
+      lower = min (get_lower left) (get_lower right);
+      upper = max (get_upper left) (get_upper right); 
       value = combine' (get_value left) (get_value right);
       left; 
       right; 
@@ -216,6 +173,7 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
         
         make_inner Red (make_inner Black a b) (make_inner Black c d)
 
+    (* no violation *)
     | _ -> 
         make_inner color left right
 
@@ -236,7 +194,7 @@ module SegmentTree (K:Key) (B:Base) (U:Updater with type base_t = B.t) = struct
               Node { n with value = v }
               
           else
-            let left_upper = Option.get (get_upper n.left) in
+            let left_upper = get_upper n.left in
             if x <= left_upper then 
               balance n.color (ins n.left) n.right
             else 
@@ -302,13 +260,16 @@ module IntKey : Key with type t = int = struct
   let le a b = a <= b
 end
 
-
 let show_sum_update = function
   | NoUpdate -> "-"
   | SetValue v -> Printf.sprintf "%d" v
   | AddValue delta -> Printf.sprintf "+%d" delta
 
 let show_sum { sum; count } = Printf.sprintf "(Sum=%d, Count=%d)" sum count
+
+
+
+
 
 let () = 
   let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
@@ -344,9 +305,10 @@ let () =
   let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
   (* let n = 8 in *)
   (* let n = 1024 in *)
-  let n = 1_000_000 in
+  let n = 100_000_000 in
   (*
   10^6  3.23s (ocaml), 1.05s (ocamlopt -O3)
+  10^7 11.5s (ocamlopt -O3)
   *)
   let tree = ST.init in
   let tree = List.fold_left (fun t i -> ST.insert i sum_init t) tree (List.init n Fun.id) in
