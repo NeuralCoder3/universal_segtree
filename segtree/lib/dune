@@ -1,4 +1,32 @@
 (library
  (public_name segtree)
  (name segtree)
-)
+ (modules segtree))
+
+; concrete domain to export
+(library
+ (name segtree_sum)
+ (modules sum_domain)
+ (libraries segtree))
+
+(executable
+ (name generator)
+ (modules generator bindings)
+ (libraries segtree_sum ctypes ctypes.stubs))
+
+; run generator to produce bridge files
+(rule
+ (targets bridge.c bridge.h bridge_stubs.ml)
+ (deps generator.exe)
+ (action (run ./generator.exe)))
+
+; final shared library
+(executable
+ (name ffi_exports)
+ (modes (native shared_object))
+ (modules bindings ffi_exports bridge_stubs)
+ (libraries segtree_sum ctypes ctypes.stubs)
+ (foreign_stubs 
+  (language c) 
+  (names init bridge))
+ (flags (:standard -linkall -w -27)))

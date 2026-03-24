@@ -1,0 +1,1 @@
+module Register = Bindings.Stubs(Bridge_stubs)

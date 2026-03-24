@@ -1,7 +1,7 @@
 open Segtree
 let test () = 
-  let module ST = SegTree(IntKey)(Sum_domain.SumBase)(Sum_domain.SumUpdater) in
-  let open Sum_domain in
+  let open Segtree_sum.Sum_domain in
+  let module ST = SegTree(IntKey)(SumBase)(SumUpdater) in
   (* let n = 1024 in *)
   let n = 8 in
   let tree = ST.init in

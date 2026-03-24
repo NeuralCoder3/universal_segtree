@@ -9,8 +9,8 @@ insert 3,4 with 1
 sum = 14 
 *)
 let test () =
-  let module ST = SegTree(IntKey)(Sum_domain.SumBase)(Sum_domain.SumUpdater) in
-  let open Sum_domain in
+  let open Segtree_sum.Sum_domain in
+  let module ST = SegTree(IntKey)(SumBase)(SumUpdater) in
   let base_value = { sum = 1; count = 1 } in
   let tree = ST.init in
   let tree = ST.insert tree 1 base_value in

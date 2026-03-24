@@ -7,8 +7,8 @@ without combined updates: O(n log n) for each query, total O(n^2 log n)
 without lazy updates: O(n) for each update + O(log n) for each query, total O(n^2)
 *)
 let test_stress () =
-  let module ST = SegTree(IntKey)(Sum_domain.SumBase)(Sum_domain.SumUpdater) in
-  let open Sum_domain in
+  let open Segtree_sum.Sum_domain in
+  let module ST = SegTree(IntKey)(SumBase)(SumUpdater) in
   let n = 1_000_000 in
   let tree = ST.init in
   let tree = List.fold_left (fun t i -> ST.insert t i sum_init) tree (List.init n Fun.id) in

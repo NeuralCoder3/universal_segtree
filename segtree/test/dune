@@ -1,17 +1,14 @@
-(test
+(executable
  (name test_sum_segtree)
- (libraries segtree)
- (modules test_sum_segtree sum_domain)
-)
+ (modules test_sum_segtree)
+ (libraries segtree segtree_sum))
 
-(test
+(executable
  (name test_update)
- (libraries segtree)
- (modules test_update sum_domain)
-)
+ (modules test_update)
+ (libraries segtree segtree_sum))
 
-(test
+(executable
  (name test_stress_update)
- (libraries segtree)
- (modules test_stress_update sum_domain)
-)
+ (modules test_stress_update)
+ (libraries segtree segtree_sum))
