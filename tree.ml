@@ -282,7 +282,6 @@ end
 It has to be known that SumBase and SumUpdate are compatible, i.e. SumUpdate.base_t = SumBase.t
 *)
 type sum_t = { sum: int; count: int }
-let sum_init = { sum = 0; count = 1 }
 module SumBase : Base with type t = sum_t = struct
   (* for single elements, sum is the value *)
   type t = sum_t
@@ -326,6 +325,7 @@ let show_sum { sum; count } = Printf.sprintf "(Sum=%d, Count=%d)" sum count
 
 
 
+let sum_init = { sum = 0; count = 1 }
 let test () = 
   let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
   (* let n = 1024 in *)
@@ -425,3 +425,5 @@ let test_stress () =
   (* Printf.printf "Total sum after %d updates: %d (expected: %d)\n%!" n total_sum.sum (n * n); *)
   (* Printf.printf "Sums after %d updates: %s\n%!" n (String.concat ", " (List.map string_of_int sums)); *)
   ()
+
+let () = test_stress ()

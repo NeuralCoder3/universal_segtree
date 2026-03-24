@@ -1,0 +1,13 @@
+.stfolder
+*copy*
+*.o
+*.cm*
+*_v*
+*.out
+*.so
+*.dll
+stress_test
+tree
+*conflict*
+__pycache__
+_opam
