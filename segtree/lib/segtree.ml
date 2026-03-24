@@ -3,6 +3,8 @@ module type Base = sig
   val combine : t -> t -> t (* associative *)
 end
 
+module type Key = sig type t end
+
 module type Updater = sig
   type base_t
   type update
@@ -18,7 +20,9 @@ module DummyUpdater (B:Base) = struct
   let apply_update v () = v
 end
 
-module type Key = sig type t end
+module IntKey : Key with type t = int = struct
+  type t = int
+end
 
 module OptionUpdater (U: Updater) = struct
   type update = U.update option
@@ -32,9 +36,7 @@ module OptionUpdater (U: Updater) = struct
     | Some u -> U.apply_update base u
 end
 
-
-
-module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) : sig
+module SegTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) : sig
   type tree
   val init : tree
   val query : tree -> K.t -> K.t -> B.t
@@ -262,141 +264,3 @@ end = struct
     ins t
 
 end
-
-
-
-
-
-
-
-(* Tests *)
-
-
-
-
-
-(* 
-It has to be known that SumBase and SumUpdate are compatible, i.e. SumUpdate.base_t = SumBase.t
-*)
-type sum_t = { sum: int; count: int }
-module SumBase : Base with type t = sum_t = struct
-  (* for single elements, sum is the value *)
-  type t = sum_t
-  let combine = fun a b -> { sum = a.sum + b.sum; count = a.count + b.count }
-end
-
-(* Outside to expose interface to user 
-  could also be handled by exposing a subtype (module type between updater and implementation)
-*)
-type sum_updates = 
-  | SetValue of int
-  | AddValue of int
-module SumUpdater : Updater with type base_t = sum_t with type update = sum_updates = struct
-  type base_t = sum_t
-  type update = sum_updates
-
-  let compose old_update new_update =
-    match (old_update, new_update) with
-    | (_, SetValue v) -> SetValue v
-    | (SetValue v, AddValue delta) -> SetValue (v + delta)
-    | (AddValue v1, AddValue v2) -> AddValue (v1 + v2)
-
-  let apply_update base update =
-    match update with
-    | SetValue v -> { base with sum = v * base.count }
-    | AddValue delta -> { base with sum = base.sum + delta * base.count }
-end
-
-module IntKey : Key with type t = int = struct
-  type t = int
-  let le a b = a <= b
-end
-
-let show_sum_update = function
-  | SetValue v -> Printf.sprintf "%d" v
-  | AddValue delta -> Printf.sprintf "+%d" delta
-
-let show_sum { sum; count } = Printf.sprintf "(Sum=%d, Count=%d)" sum count
-
-
-
-
-
-let sum_init = { sum = 0; count = 1 }
-let test () = 
-  let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
-  (* let n = 1024 in *)
-  let n = 8 in
-  let tree = ST.init in
-  let tree = List.fold_left (fun t i -> ST.insert t i sum_init) tree (List.init n Fun.id) in
-  Printf.printf "%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
-  Printf.printf "Initial sum of [0, n): %d\n%!" (ST.query tree 0 n).sum;
-  Printf.printf "\n\n\n%!";
-  let tree = ST.point_update tree 5 (fun v -> { v with sum = 10 }) in
-  Printf.printf "%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
-  Printf.printf "After point update at index 5: %d\n%!" (ST.query tree 0 n).sum;
-  Printf.printf "\n\n\n%!";
-  let tree = ST.range_update tree 1 4 (AddValue 2) in
-  Printf.printf "%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
-  Printf.printf "After range update [1, 4): %d\n" (ST.query tree 0 n).sum;
-  Printf.printf "\n\n\n%!";
-  ()
-
-
-(* 
-lazy init:
-1,2,5 with 1
-sum = 3
-+3 on all
-sum = 12
-insert 3,4 with 1
-sum = 14 
-*)
-let test2 () =
-  let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
-  let base_value = { sum = 1; count = 1 } in
-  let tree = ST.init in
-  let tree = ST.insert tree 1 base_value in
-  let tree = ST.insert tree 2 base_value in
-  let tree = ST.insert tree 5 base_value in
-  Printf.printf "Initial tree:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
-  Printf.printf "Initial sum of [0, n): %d\n%!" (ST.query tree 0 6).sum;
-  Printf.printf "\n\n\n%!";
-  let tree = ST.range_update tree 0 6 (AddValue 3) in
-  Printf.printf "After adding 3 to all:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
-  Printf.printf "Sum of [0, n) after adding 3: %d\n%!" (ST.query tree 0 6).sum;
-  Printf.printf "\n\n\n%!";
-  let tree = ST.insert tree 3 base_value in
-  let tree = ST.insert tree 4 base_value in
-  Printf.printf "After inserting 3 and 4:\n%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
-  Printf.printf "Sum of [0, n) after inserting 3 and 4: %d\n%!" (ST.query tree 0 6).sum;
-  Printf.printf "\n\n\n%!";
-  ()
-
-  
-(* 
-stress test for lazy update:
-update root (whole tree) n time +1, query each point individually
-ideal runtime: O(n + n log n) = O(n log n)
-without combined updates: O(n log n) for each query, total O(n^2 log n)
-without lazy updates: O(n) for each update + O(log n) for each query, total O(n^2)
-*)
-let test_stress () =
-  let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
-  let n = 1_000_000 in
-  let tree = ST.init in
-  let tree = List.fold_left (fun t i -> ST.insert t i sum_init) tree (List.init n Fun.id) in
-
-  Printf.printf "Starting stress test with %d updates...\n%!" n;
-  let init_time = Sys.time () in
-  let tree = List.fold_left (fun t _ -> ST.range_update t 0 n (AddValue 1)) tree (List.init n (fun _ -> ())) in
-  let total_sum = ST.query tree 0 n in
-  let sums = List.init n (fun i -> (ST.query tree i i).sum) in
-  let point_sum_correct = List.for_all ((=) n) sums in
-  let end_time = Sys.time () in
-  Printf.printf "Stress test completed in %.2f seconds.\n%!" (end_time -. init_time);
-  Printf.printf "Total sum correct? %b\n%!" (total_sum.sum = n * n);
-  Printf.printf "Point sums correct? %b\n%!" point_sum_correct;
-  ()
-
-let () = test_stress ()
