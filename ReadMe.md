@@ -4,7 +4,9 @@ A segment tree implementation over
 - an arbitrary base type B, and 
 - key type K with an 
 - operation C on B, and
-- (optional) range updates U, such that:
+- (optional) range updates U
+
+such that:
 
 - C:B×B→B is associative
 - K is ordered (supports comparisons -- all types in OCaml do (except functions))

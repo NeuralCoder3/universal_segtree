@@ -15,7 +15,6 @@ module DummyUpdater (B:Base) = struct
   type base_t = B.t
   type update = unit
   let compose () () = ()
-  (* let apply_update v () = failwith "no range updates supported" *)
   let apply_update v () = v
 end
 
@@ -35,10 +34,6 @@ end
 
 
 
-(* 
-    lower update is older => apply first
-    maintained by not placing an update under an existing one (always propagate the old one before)
-*)
 module SegmentTree (K:Key) (B:Base) (BU:Updater with type base_t = B.t) : sig
   type tree
   val init : tree
@@ -54,6 +49,10 @@ end = struct
   (* split node to allow aliasing it in matching *)
   type node = {
       value: B.t; 
+      (* 
+          lower update is older => apply first
+          maintained by not placing an update under an existing one (always propagate the old one before)
+      *)
       update: U.update;
       (* empty for leaf (both are always simultanously empty) *)
       left: tree; 
@@ -67,7 +66,6 @@ end = struct
     | Empty 
     | Node of node
 
-  (* helper *)
   let get_value = function
     | Empty -> None
     | Node n -> Some (U.apply_update n.value n.update)
@@ -96,7 +94,6 @@ end = struct
     in
     Option.get (aux U.empty tree)
 
-  (* helper *)
   let apply_update tree u =
     match tree with
     | Empty -> failwith "Empty node cannot be updated"
@@ -331,9 +328,6 @@ let test () =
   (* let n = 1024 in *)
   let n = 8 in
   let tree = ST.init in
-  (*
-    Create all keys
-  *)
   let tree = List.fold_left (fun t i -> ST.insert t i sum_init) tree (List.init n Fun.id) in
   Printf.printf "%s\n%!" (ST.show string_of_int show_sum_update show_sum tree);
   Printf.printf "Initial sum of [0, n): %d\n%!" (ST.query tree 0 n).sum;
@@ -387,43 +381,22 @@ ideal runtime: O(n + n log n) = O(n log n)
 without combined updates: O(n log n) for each query, total O(n^2 log n)
 without lazy updates: O(n) for each update + O(log n) for each query, total O(n^2)
 *)
-
 let test_stress () =
   let module ST = SegmentTree(IntKey)(SumBase)(SumUpdater) in
-  (* let n = 8 in *)
-  (* let n = 1024 in *)
   let n = 1_000_000 in
-  (*
-  Red-Black:
-  10^6  3.23s (ocaml), 1.05s (ocamlopt -O3)
-  10^7 11.5s (ocamlopt -O3)
-
-  AVL: (should only change creation time)
-  10^6: 0.94s (ocamlopt -O3)
-  *)
   let tree = ST.init in
   let tree = List.fold_left (fun t i -> ST.insert t i sum_init) tree (List.init n Fun.id) in
-
-  (* let tree' = tree in
-  let tree' = ST.range_update tree' 0 n (AddValue 1) in
-  Printf.printf "Sum after one update: %d\n%!" (ST.query tree' 0 n).sum;
-  Printf.printf "Point Sum after one update: %d\n%!" (ST.query tree' 0 1).sum;
-  let tree' = ST.range_update tree' 0 n (AddValue 1) in
-  Printf.printf "Sum after two updates: %d\n%!" (ST.query tree' 0 n).sum;
-  Printf.printf "Point Sum after two updates: %d\n%!" (ST.query tree' 0 1).sum; *)
 
   Printf.printf "Starting stress test with %d updates...\n%!" n;
   let init_time = Sys.time () in
   let tree = List.fold_left (fun t _ -> ST.range_update t 0 n (AddValue 1)) tree (List.init n (fun _ -> ())) in
   let total_sum = ST.query tree 0 n in
   let sums = List.init n (fun i -> (ST.query tree i i).sum) in
+  let point_sum_correct = List.for_all ((=) n) sums in
   let end_time = Sys.time () in
   Printf.printf "Stress test completed in %.2f seconds.\n%!" (end_time -. init_time);
-  (* Printf.printf "%s\n%!" (ST.show string_of_int show_sum_update show_sum tree); *)
   Printf.printf "Total sum correct? %b\n%!" (total_sum.sum = n * n);
-  Printf.printf "Point sums correct? %b\n%!" (List.for_all ((=) n) sums);
-  (* Printf.printf "Total sum after %d updates: %d (expected: %d)\n%!" n total_sum.sum (n * n); *)
-  (* Printf.printf "Sums after %d updates: %s\n%!" n (String.concat ", " (List.map string_of_int sums)); *)
+  Printf.printf "Point sums correct? %b\n%!" point_sum_correct;
   ()
 
 let () = test_stress ()
